@@ -1,11 +1,9 @@
 package mate.academy;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -25,7 +23,12 @@ public class EventManager {
         if (closed.get()) {
             throw new IllegalStateException("Cannot register listener: EventManager is shut down");
         }
+
         listeners.add(listener);
+        if (closed.get()) {
+            listeners.remove(listener);
+            throw new IllegalStateException("Cannot register listener: EventManager is shut down");
+        }
     }
 
     public void deregisterListener(EventListener listener) {
@@ -42,8 +45,9 @@ public class EventManager {
         if (closed.get()) {
             throw new IllegalStateException("Cannot notify event: EventManager is shut down");
         }
+        List<EventListener> snapshot = new ArrayList<>(listeners);
 
-        for (EventListener l : listeners) {
+        for (EventListener l : snapshot) {
             try {
                 executor.submit(() -> {
                     try {
@@ -54,7 +58,8 @@ public class EventManager {
                     }
                 });
             } catch (RejectedExecutionException e) {
-                LOGGER.log(Level.WARNING, "Task rejected. EventManager is likely shutting down.");
+                LOGGER.log(Level.WARNING, "Task for listener " + l.getClass().getSimpleName()
+                        + " rejected. Submission aborted due to shutdown.", e);
                 break;
             }
         }
@@ -69,7 +74,7 @@ public class EventManager {
         try {
             boolean terminated = executor.awaitTermination(5, TimeUnit.SECONDS);
             if (!terminated) {
-                System.err.println("Not all tasks finished, forcing immediate shutdown...");
+                LOGGER.log(Level.WARNING, "Not all tasks finished, forcing immediate shutdown...");
                 executor.shutdownNow();
             }
         } catch (InterruptedException e) {
